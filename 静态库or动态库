@@ -218,3 +218,163 @@ linux操作系统静态库
 
 　　导出 LD_LIBRARY_PATH 后，如有可能，所有从当前 shell 启动的可执行程序都将使用 /usr/lib/old 或 /opt/lib 中的库，
   如果仍不能满足一些共享库相关性要求，则转回到 /etc/ld.so.conf 中指定的库。
+  
+  0.前言
+    在较为复杂的项目中会利用到交叉编译得到的共享库（*.so文件）。在这种情况下便会产生以下疑问，例如：
+    【1】交叉编译时的共享库是否需要放置于目标板中，如果需要放置在哪个目录中。
+    【2】交叉编译时的共享库是否需要放置于宿主机中，如果需要放置于哪个目录中。
+    【3】交叉编译时如何指定共享库
+    【4】程序运行时如何查找共享库
+    等等问题。
+    
+    博文总结了使用共享库的一般方法，并通过一个例子说明问题。如果已经有了交叉编译好的共享库，可以从【2】开始，步骤【1】只是为了说明问题，捏造一个简单的共享库试图说明问题。
+    【1】交叉编译获得链接库
+    【2】交叉编译源文件并加入链接库
+    【3】移动动态链接库
+    【4】执行
+
+    【必要说明】
+    【宿主机】Ubuntu 14.04 AMD64
+    【目标板】树莓派
+    
+    【相关博文】
+    【例说makefile索引博文】
+    【树莓派学习笔记——交叉编译工具链】
+
+    【代码仓库】——makefile-example
+    代码仓库位于bitbucket，可借助TortoiseHg（GUI工具）克隆代码或者在网页中直接下载zip包。    
+
+1.交叉编译获得动态链接库
+    本例先制作一个非常简单的共享库，共享库包含两个API——add和sub。
+    【libtest.h】
+    指定接口，给出相应声明
+#ifndef __LIBTEST_H
+#define __LIBTEST_H
+int sub(int a, int b);
+int add(int a, int b);
+#endif
+    【test-add.c】
+int add(int a, int b)
+{
+    return a+b;
+}
+    【test-sub.c】
+int sub(int a, int b)
+{
+    return a-b;
+}
+    【makefile】
+    在同目录下包含makefile文件，请替换其中的[tab]，并以代码仓库中的makefile文件为主。编译完成之后，把libtest.so移动到上级lib目录中。请注意此时的交叉工具链为arm-linux-gnueabihf-gcc
+ ，目标b
+# 指令编译器和选项
+CC = arm-linux-gnueabihf-gcc
+CFLAGS = -Wall -std=gnu99
+# 目标文件
+TARGET = libtest.so
+# C文件
+SRCS = test-add.c test-sub.c
+# 目标文件
+OBJS = $(SRCS:.c=.o)
+# 链接为可执行文件
+$(TARGET):$(OBJS)
+[tab]$(CC) -shared -o $@ $^
+[tab]mv $(TARGET) ../lib
+clean:
+[tab]rm -rf $(TARGET) $(OBJS)
+# 编译规则 $@代表目标文件 $< 代表第一个依赖文件
+%.o:%.c
+[tab]$(CC) $(CFLAGS) -o $@ -fPIC -c $<
+    【必要的验证】
+    使用file指令查看libtest.so信息。
+    file libtest.so
+libtest.so: ELF 32-bit LSB  shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=e22558b8cf089b92e5534b636c6d501f1cc54581, not stripped
+    从控制台的输出信息可以看出，libtest.so运行于ARM平台，而不是宿主机的AMD64平台。
+
+2.交叉编译源文件并加入动态链接库
+    【源文件】
+#include <stdio.h>
+#include <libtest.h>
+int main(void)
+{
+    int a = 3;
+    int b = 2;
+       
+    printf("a=%d\n", a);
+    printf("b=%d\n", b);
+   
+    printf("a+b=%d\n", add(a, b));
+    printf("a-b=%d\n", sub(a, b));
+    return 0;
+}
+    【makefile文件】    
+# 指定编译器和选项
+# 指定树莓派交叉编译器
+CC = arm-linux-gnueabihf-gcc
+CFLAGS = -Wall -std=gnu99
+# 目标文件
+TARGET = test
+# C文件
+SRCS = test.c
+# 头文件查找路径
+INC = -I.
+# 库文件和库查找路径
+DLIBS = -ltest
+LDFLAGS = -L./lib
+# 目标文件
+OBJS = $(SRCS:.c=.o)
+# 链接为可执行文件
+$(TARGET):$(OBJS)
+[tab]$(CC) -o $@ $^ $(LDFLAGS) $(DLIBS)
+clean:
+[tab]rm -rf $(TARGET) $(OBJS)
+# 编译规则 $@代表目标文件 $< 代表第一个依赖文件
+%.o:%.c
+[tab]$(CC) $(CFLAGS) $(INC) -o $@ -c $<
+    【说明】
+    【1】交叉工具链为arm-linux-gnueabihf-gcc
+    【2】指定了交叉编译之后的共享库和共享库路径，链接共享库使用-ltest，共享库位于lib目录下。请注意-ltest对应libtest.so。
+    【3】make之后可获得可执行文件，通过file test查看信息。
+test: ELF 32-bit LSB  executable, ARM, EABI5 version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.26, BuildID[sha1]=88e4142dceabd295369657b29757141f98a03753, not stripped
+    从控制台的输出可以看出，该可执行文件运行平台为ARM，而不是AMD64。
+
+3.移动动态链接库
+    【移动共享库至目标板/usr/lib目录中】
+    通过FTP工具把共享库传输至树莓派中，然后通过cp指令复制到/usr/lib中
+    sudo cp libtest.so /usr/lib
+    linux系统中默认的搜多路径为/lib和/usr/lib，libtest.so可以复制到任何目录中。
+    修改libtest.so的执行权限。
+    sudo chmod 775 libtest.so
+
+4.执行
+    【FTP上传】
+    通过FTP工具把可执行文件test复制到树莓派中，然后通过ldd指令查看共享库链接状态。
+    【检验】
+    ldd test
+/usr/lib/arm-linux-gnueabihf/libcofi_rpi.so (0xb6f7f000)
+libtest.so => /usr/lib/libtest.so (0xb6f6b000)
+libc.so.6 => /lib/arm-linux-gnueabihf/libc.so.6 (0xb6e3b000)
+/lib/ld-linux-armhf.so.3 (0xb6f8d000)
+    从控制台的输出可以看出，test成功链接了位于/usr/lib中的libtest.so
+
+    【执行】
+    ./test
+a=3
+b=2
+a+b=5
+a-b=1
+    从执行结果看，前面所做的努力是正确的。
+
+5.总结
+    回答在前言中的问题。
+    【1】交叉编译时的共享库是否需要放置于目标板中，如果需要放置在哪个目录中。
+    交叉编译之后的共享库需要复制到目标板中，最好放置于/usr/lib或/lib中，当然也有其他的方法，在这里不详细说明。
+
+    【2】交叉编译时的共享库是否需要放置于宿主机中，如果需要放置于哪个目录中。
+    交叉编译时确切的说链接过程中需要指定共享库的问题，通过-L指定目录，通过-l指定共享库名称。但是此时交叉编译的共享库最好不要放置于宿主机的/lib或/usr/lib中，以免产生混淆。
+    综合【1】和【2】，libtest.so同时存在于目标板和宿主机中。
+
+    【3】交叉编译时如何指定共享库
+    通过-L指定目录，通过-l指定共享库名称
+
+    【4】程序运行时如何查找共享库
+    最直观的方法，复制到/usr/lib目录中，让linux系统自动查找。
