@@ -1,0 +1,220 @@
+linux操作系统静态库
+　　linux 中的函数库分有两种：静态库和共享库。可以从库文件的后缀区分它们，后缀为.a的代表静态库，以.so为后缀的代表共享库。为了了解关于库，我们下面创建一个静态库，然后在程序中使用它。
+
+　　一、静态库
+
+　　1.建立一个fred.c的文件在里面我们写入如下代码：
+
+　　[root@M2_test_192.168.8.93_61618_A code]# vim fred.c
+
+　　#include
+
+　　void fred(int arg){
+
+　　printf("fred:you passed %d \n",arg);
+
+　　}
+
+　　2.再建立一个bill.c的文件，在里面也写入一些代码
+
+　　[root@M2_test_192.168.8.93_61618_A code]# vim bill.c
+
+　　#include
+
+　　void bill(char *arg){
+
+　　printf("bill:you passed %s \n",arg);
+
+　　}
+
+　　然后分别编译这两个函数，产生要包含在库文件中的目标文件
+
+　　[root@M2_test_192.168.8.93_61618_A code]# gcc -c bill.c fred.c
+
+　　这里gcc通过-c选项来阻止编译器创建一个完整的程序，如果试图创建一个完整的程序将不会成功，因为我们还为定义main函数
+
+　　下面我们开始编写一个调用bill函数的程序。首先，为我们的库文件创建一个头文件，这个头文件将声明我们的库文件中的函数，
+  它应该被所希望使用我们库文件的应用程序所包含。
+
+　　3.创建lib.h头文件：
+
+　　[root@M2_test_192.168.8.93_61618_A code]# vim lib.h
+
+　　void bill(char *);
+
+　　void fred(int);
+
+　　4.编写一个名为program.c的程序，他包含库的头文件并且调用库中的一个函数
+
+　　[root@M2_test_192.168.8.93_61618_A code]# vim program.c
+
+　　#include "lib.h"
+
+　　int main()
+
+　　{
+
+　　bill("Hello World");
+
+　　return 0;
+
+　　}
+
+　　5.我们开始编译这个程序，我们暂时为编译器显示指定目标文件，然后要求编译器编译我们的文件并将其与预先编译好的目标
+  模块bill.o链接
+
+　　[root@M2_test_192.168.8.93_61618_A code]# gcc -c program.c
+
+　　[root@M2_test_192.168.8.93_61618_A code]# gcc -o program program.o bill.o
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ./program
+
+　　bill:you passed Hello World
+
+　　6.现在我们创建并使用一个库文件，静态库文件也称作归档文件，都是以.a结尾的，可以通过file命令查看：
+
+　　[root@M2_test_192.168.8.93_61618_A code]# file /lib/libdevmapper.a
+
+　　/lib/libdevmapper.a: current ar archive
+
+　　创建这样的静态库文件需要用ar命令，将我们创建好的函数文件添加进到归档文件(静态库文件)libfoo.a中
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ar crv libfoo.a bill.o fred.o
+
+　　a - bill.o
+
+　　a - fred.o
+
+　　库文件创建好了，某些系统可能需要为函数库生成一个内容表，我们通过ranlib命令来完成这一任务，linux中，如果我们
+  使用GNU的软件开发工具，这一步是不必需的，但是做了也无妨
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ranlib libfoo.a
+
+　　现在我们的静态函数库可以使用了
+
+　　[root@M2_test_192.168.8.93_61618_A code]# gcc -o program program.c libfoo.a
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ./program
+
+　　bill:you passed Hello World
+
+　　也可以使用-l选项来访问我们的函数库，但是因为其未保存到标准位置，所以我们必须要用-L选项来指示编译器在何处可以找到函数库
+
+　　[root@M2_test_192.168.8.93_61618_A code]# gcc -o program program.c -L. -lfoo
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ./program
+
+　　bill:you passed Hello World
+  二、共享库
+
+　　静态库有一个缺点，当我们同时运行许多程序，并且他们都是用来自同一个函数库的函数时，就会在内存中有同一个函数的多份拷贝，在程序文件自身也有多份同样的拷贝，将消耗大量宝贵的内存和磁盘空间。
+
+　　linux支持共享库，它克服了上述不足。共享库和静态库保存位置是一样的，文件后缀不一样，共享库是以.so结尾的。与静态库不同，程序使用静态库的时候，程序本身不会包含函数的代码，而是引用运行时可以访问的共享代码。当编译好的程序被装载到内存中执行时，函数引用被解析并产生对共享库的调用，如果有必要共享库才被加载到内存中。通过这种方法，系统可只保留一份拷贝并供许多程序同时引用，并且在磁盘上也仅保留一份。
+
+　　我们可以这么说，引用静态可库的程序本身在编译的时候连接器会把引用的函数复制到程序中，即程序包含执行所需的所有函数 
+  ， 换句话说，它们是“完整的”。因为这一原因，这样的程序一旦编译以后，就不依赖任何外部库就可以运行了。但是共享库不同，
+  编译完程序以后，引用过共享库的程序要正确执行，引用的外部库一定要存在，否则执行程序必然失败。
+
+　　ldd 命令来确定某一特定可执行程序是否引用共享库。如下
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ldd program
+
+　　libc.so.6 => /lib64/libc.so.6 (0x0000003485600000)
+
+　　/lib64/ld-linux-x86-64.so.2 (0x0000003485200000)
+
+　　因为我们的静态函数库本身又引用了stdio.h，这个头文件使用的printf这个函数是从共享库 /lib64/libc.so.6的引用的，
+  至于还有一个叫/lib64/ld-linux-x86-64.so.2的共享库，这个后面我们会具体了解下它。
+
+　　我们再来看看，同样功能的两个程序，一个可能是引用静态库，另外一个引用了共享库
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ldd /sbin/sln
+
+　　not a dynamic executable
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ldd /bin/ln
+
+　　libc.so.6 => /lib64/libc.so.6 (0x0000003485600000)
+
+　　/lib64/ld-linux-x86-64.so.2 (0x0000003485200000)
+
+　　第一个是一个完整的，不依赖外部库的程序，通过ldd以后提示不是一个动态链接的可执行程序，后面一个引用了两个共享库，我们再来看这两个程序的大小
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ll -h /sbin/sln
+
+　　-rwxr-xr-x 1 root root 605K Jun 8 2010 /sbin/sln
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ll -h /bin/ln
+
+　　-rwxr-xr-x 1 root root 32K Mar 1 2010 /bin/ln
+
+　　很明显，不引用外部共享库的要比引用外部共享库的大10倍左右，这是因为引用共享库的程序是不完整的程序，它依靠外部共享
+  库来提供运行所需的许多函数。
+
+　　三、动态装入器
+
+　　如果程序中引用外部共享库，那么需要一个动态装入器(dynamic loader)，它负责装载共享库并解析客户程序函数引用，在linux中，这个装载器是ld.so，也有可能是ld-linux.so.2或者ld-lsb.so.1，它实际上是你在 ln 的 ldd 清单中看到的作为共享库相关性列出的 ld-linux.so.2 库。下面我们迅速查看一下动态装入器如何在系统上找到适当的共享库。
+
+　　动态装入器找到共享库要依靠两个文件 ： /etc/ld.so.conf 和 /etc/ld.so.cache。如果你对 /etc/ld.so.conf 文件进行 cat 操作，您可能会看到一个与下面类似的清单：
+
+　　[root@M2_test_192.168.8.93_61618_A code]# cat /etc/ld.so.conf
+
+　　include ld.so.conf.d/*.conf
+
+　　[root@M2_test_192.168.8.93_61618_A code]# cat /etc/ld.so.conf.d/usr_local_lib.conf
+
+　　/usr/local/lib
+
+　　ld.so.conf 文件包含一个所有目录(/lib 和 /usr/lib 除外，它们会自动包含在其中)的清单，动态装入器将在其中查找共享库。但是在动态装入器能“看到”这一信息之前，必须将它转换到 ld.so.cache 文件中。可以通过运行 ldconfig 命令做到这一点：
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ldconfig
+
+　　当 ldconfig 操作结束时，您会有一个最新的 /etc/ld.so.cache 文件，它反映您对 /etc/ld.so.conf 所做的更改。从这一
+  刻起，动态装入器在寻找共享库时会查看您在 /etc/ld.so.conf 中指定的所有新目录。
+
+　　四、ldconfig 技巧
+
+　　要查看 ldconfig 可以“看到”的所有共享库，请输入：
+
+　　[root@M2_test_192.168.8.93_61618_A code]# ldconfig -p | less
+
+　　413 libs found in cache `/etc/ld.so.cache'
+
+　　libz.so.1 (libc6,x86-64) => /lib64/libz.so.1
+
+　　libz.so.1 (libc6,x86-64) => /usr/lib64/libz.so.1
+
+　　libz.so.1 (libc6) => /lib/libz.so.1
+
+　　libz.so.1 (libc6) => /usr/lib/libz.so.1
+
+　　libz.so (libc6,x86-64) => /lib64/libz.so
+
+　　libz.so (libc6,x86-64) => /usr/lib64/libz.so
+
+　　libz.so (libc6) => /lib/libz.so
+
+　　libz.so (libc6) => /usr/lib/libz.so
+
+　　libxml2.so.2 (libc6,x86-64) => /usr/lib64/libxml2.so.2
+
+　　libwrap.so.0 (libc6,x86-64) => /lib64/libwrap.so.0
+
+　　libwrap.so (libc6,x86-64) => /usr/lib64/libwrap.so
+
+　　libvolume_id.so.0 (libc6,x86-64) => /lib64/libvolume_id.so.0
+
+　　libuuid.so.1 (libc6,x86-64) => /lib64/libuuid.so.1
+
+　　libuuid.so.1 (libc6) => /lib/libuuid.so.1
+
+　　..... (还有很多)
+
+　　还有另一个方便的技巧可以用来配置共享库路径。有时候你希望告诉动态装入器在尝试任何 /etc/ld.so.conf 路径以前先尝试
+  使用特定目录中的共享库。在您运行的较旧的应用程序不能与当前安装的库版本一起工作的情况下，这会比较方便。要指示动态装
+  入器首先检查某个目录，请将 LD_LIBRARY_PATH 变量设置成您希望搜索的目录。多个路径之间用逗号分隔;例如：
+
+　　[root@M2_test_192.168.8.93_61618_A code]# export LD_LIBRARY_PATH="/usr/lib/old:/opt/lib"
+
+　　导出 LD_LIBRARY_PATH 后，如有可能，所有从当前 shell 启动的可执行程序都将使用 /usr/lib/old 或 /opt/lib 中的库，
+  如果仍不能满足一些共享库相关性要求，则转回到 /etc/ld.so.conf 中指定的库。
