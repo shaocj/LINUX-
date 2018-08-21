@@ -1,0 +1,331 @@
+#define MAX_PACK_SIZE (2048)
+
+
+
+
+		
+
+
+unsigned int LinkMsgCode(unsigned char * sourceBuf,unsigned short sourceSize,
+					unsigned char * desBuf,unsigned short desMaxSize)
+{
+	unsigned int i =0;
+	unsigned int bResult = 1;
+	unsigned int dwTailLen = 0;
+	unsigned int size = 0;
+	unsigned int dwOutLen = 0;
+	unsigned int ucBcc = 0;
+	unsigned int ucTemp;
+	if(sourceBuf == 0 || sourceSize == 0
+		|| desBuf == 0 || desMaxSize == 0)
+	{
+		return 0;		
+	}
+    memset(desBuf,0,desMaxSize);
+	i =0;
+	bResult = 1;
+	dwTailLen = 0;
+	size = 0;
+	dwOutLen = 0;
+	ucBcc = 0;
+
+	if (sourceSize < desMaxSize)
+	{	ucBcc = 0;
+		
+		desBuf[ 0 ] = COMHEAD;		//A5
+		
+		dwOutLen++;
+		for(i = 0; i < sourceSize; i++ )
+		{
+			ucTemp = (unsigned char)sourceBuf[i];
+            
+			ucBcc ^= ucTemp;
+			desBuf[ dwOutLen ] = ucTemp;
+			dwOutLen++;
+			if ( ( dwOutLen + 1 ) >= MAX_PACK_SIZE )
+			{				
+				break;
+			}
+			else if ( ( ucTemp == COMHEAD ) ||  (ucTemp == COMTAIL ) )
+			{
+				desBuf[ dwOutLen ] = ucTemp;
+				dwOutLen++;
+				if ( ( dwOutLen + 1 ) >= MAX_PACK_SIZE )
+				{		
+					break;
+				}
+			}
+		}
+        
+		if ( ( ucBcc == COMHEAD ) || ( ucBcc == COMTAIL ) )
+		{
+			dwTailLen = 1;
+		}
+
+		if ( ( dwOutLen + 3 + dwTailLen ) < MAX_PACK_SIZE )
+		{
+			bResult = 0;
+
+			desBuf[ dwOutLen ] = ucBcc;
+			dwOutLen++;
+			if ( ( ucBcc == COMHEAD ) || ( ucBcc == COMTAIL ) )
+			{
+				desBuf[ dwOutLen ] = ucBcc;
+				dwOutLen++;
+			}
+			desBuf[ dwOutLen ] = COMTAIL;
+			dwOutLen++;
+			desBuf[ dwOutLen ] = 0x00;
+			dwOutLen++;
+		}
+	}
+	return dwOutLen;		
+}
+
+
+unsigned int  LinkMsgDeCode(unsigned         char * ucData,
+						unsigned char * msgBuf,unsigned short  bufMaxSize,
+						DeCodeInfo * deCodeInfo)
+{
+	unsigned int  deCodeRet = LINK_DECODE_RET_NULL;	
+	unsigned char * status =0;
+	unsigned int * bcc = 0;
+	unsigned int * inLen = 0;
+	if(bufMaxSize == 0 || msgBuf == 0 || deCodeInfo == 0)
+	{
+			return LINK_DECODE_RET_ERROR;		
+	}
+
+	status = &(deCodeInfo->status);
+	bcc = &(deCodeInfo->bcc);
+	inLen = &(deCodeInfo->inLen);
+
+	switch(*status)
+	{
+
+	case COM_ANA_IDLE:
+		if ( COMHEAD == *ucData )
+		{
+			*status = COM_ANA_HEAD;
+			*bcc = 0;
+			*inLen = 1;
+			msgBuf[ 0 ] = COMHEAD;
+		}
+		break;
+	case COM_ANA_NEXT_H:
+		*status = COM_ANA_HEAD;
+		*bcc = 0;
+		*inLen = 1;
+		msgBuf[ 0 ] = COMHEAD;
+    case COM_ANA_HEAD:
+		if ( COMHEAD == *ucData )
+		{
+			*status = COM_ANA_HH;
+		}
+		else if ( COMTAIL == *ucData )
+		{
+			*status = COM_ANA_TT;
+		}
+		else
+		{
+			msgBuf[ *inLen ] = *ucData;
+			(*inLen)++;
+			*bcc ^= *ucData;
+		}
+		break;
+
+	case COM_ANA_HH:
+		if ( COMHEAD == *ucData )
+		{
+			msgBuf[ *inLen ] = *ucData;
+			(*inLen)++;
+			*bcc ^= *ucData;
+			*status = COM_ANA_HEAD;
+		}
+		else if ( COMTAIL == *ucData  )
+		{
+			*status = COM_ANA_TT;
+		}
+		else
+		{
+			*status = COM_ANA_HEAD;
+		}
+		break;
+	case COM_ANA_TT:
+		if ( COMTAIL == *ucData )
+		{
+			msgBuf[ *inLen ] = *ucData;
+			(*inLen)++;
+			*bcc ^= *ucData;
+			*status = COM_ANA_HEAD;
+		}
+		else if ( ( 0x00 == *ucData ) || ( COMHEAD == *ucData ) )
+		{
+			if ( *bcc == 0)
+			{				 
+				if ( COMHEAD == *ucData )
+				{
+					msgBuf[*inLen] = COMTAIL;
+					(*inLen)++;
+					deCodeRet = *inLen;
+				}
+				else
+				{
+					msgBuf[*inLen] = COMTAIL;
+					(*inLen)++;
+					msgBuf[*inLen] = 0x00;
+					(*inLen)++;
+					deCodeRet = *inLen;
+				}
+			}
+			else
+			{
+				//校验不过，丢包了
+				deCodeRet = LINK_DECODE_RET_ERROR;
+			}
+			if ( COMHEAD == *ucData )
+			{
+				*status = COM_ANA_NEXT_H;
+			}
+			else
+			{
+				*status = COM_ANA_IDLE;
+			}
+		}
+		break;
+	default:
+		break;
+	}
+	
+	if ( *inLen >= bufMaxSize)
+	{
+		deCodeRet = LINK_DECODE_RET_ERROR;
+		*status = COM_ANA_IDLE;
+		*inLen = 0;
+	}
+	return deCodeRet;
+}
+
+
+
+unsigned char LinkMsgGetAppMsg(unsigned char * linkMsg,unsigned short linkMsgSize, 
+						unsigned char * appBuf,unsigned short appBufSize)
+{
+	if(linkMsg == 0 || appBuf == 0 || appBufSize < linkMsgSize - 4)
+	{	
+		return 0;
+	}
+	//包头，BCC校验，包尾，结束符共4个字节
+	memcpy(appBuf,linkMsg + 1,linkMsgSize - 3);
+	return linkMsgSize - 4;
+}
+
+
+#ifndef _GUBEI_PROTOCOL_H_
+#define _GUBEI_PROTOCOL_H_
+
+#ifdef __cplusplus
+    extern "C"{
+#endif
+
+typedef struct dna_standard_head
+{
+    unsigned int magic; /* Start data for frame. Let's define as 0x5a5aa5a5; */
+    unsigned short checksum; /* checksum */
+    unsigned short type; /* Define command type. */
+    unsigned short len; /* Define data stream len. */
+    unsigned short version;/*版本信息*/
+    unsigned int fill_data;/*填充数据*/
+}dna_standard_head_t;
+
+#define LANGUAGE_MODEL_VERSION_QUERY    0x0800  /*查询语音模型版本号*/
+#define LANGUAGE_MODEL_VERSION_QUERY_ACK    0x0801  /*语音模型版本号应答*/
+#define LANGUAGE_MODEL_UPDATE_REQUEST   0x0802  /*启动语音模型Xmodem升级 */
+#define LANGUAGE_MODEL_UPDATE_ACK       0x0803  /*启动语音模型Xmodem升级应答*/
+#define IIS_PARAMETER_SET_REQUEST       0x0804  /*配置语音I2S参数*/
+#define IIS_PARAMETER_SET_ACK           0x0805  /*配置语音I2S参数应答*/
+#define LOCAL_ASR_RESULT_NOTIFY         0x0806  /*本地语音识别通知*/
+#define LOCAL_ASR_RESULT_ACK            0x0807  /*本地语音识别通知应答*/
+#define FACTORY_TEST_QUEST              0x0808  /*启动语音厂测模式*/
+#define FACTORY_TEST_ACK                0x0809  /*启动语音厂测模式应答*/
+#define FACTORY_TEST_END_NOTIFY         0x080a  /*语音厂测完成通知*/
+#define FACTORY_TEST_END_ACK            0x080b  /*语音厂测完成应答*/
+#define VAD_PARAMETER_SET_QUEST         0x080c  /*配置VAD 参数*/
+#define VAD_PARAMETER_SET_ACK           0x080d  /*配置VAD 应答*/
+#define SEND_ADPCM_DATA_REQUEST         0x080e  /*发送adpcm 数据*/
+#define SEND_ADPCM_DATA_ACK             0x080f  /*发送adpcm 数据应答*/
+#define ADPCM_PLAY_REQUEST              0x0810  /*语音播报*/
+#define ADPCM_PLAY_ACK                  0x0811  /*语音播报应答*/
+#define LANGUAGE_UPDATE_NOTIFY          0x0812  /*语言模型升级推送*/
+#define LANGUAGE_UPDATE_ACK             0x0813  /*语言模型升级推送应答*/
+
+#define SEND_MP3_DATA_REQUEST           0x0814  /*语言模型升级推送应答*/
+#define SEND_PCM_START                  0x0824  /*发送PCM数据起始包*/
+#define SEND_PCM_MIDDLE                 0x0825  /*发送PCM数据中间包*/
+#define SEND_PCM_FINISH                 0x0826  /*发送PCM数据结束包*/
+
+#define MP3_BUFF_START_RECV             0x0815
+#define MP3_REQ_NET_DATA                0x0816
+#define NET_MP3_PLAY_START              0x0817
+#define NET_MP3_PLAY_STOP               0x081c////0x0818
+#define NET_MP3_PLAY_PAUSE              0x0819
+#define NET_MP3_PLAY_RESUME             0x081a
+#define NET_MP3_PLAY_INSERT_PROMPT      0x081b
+#define MP3_BUFF_RECV_END               0x0818//0x081c
+#define MP3_PLAYER_IDLE                 0x081d
+
+
+/*美的美居协议使用*/
+#define MIDEA_RX_CMD                    0x0830   /*收到MTK发送的消息*/
+#define MIDEA_DIALOGID                  0x0831   /*对话事件ID*/
+#define MIDEA_TX_CMD                    0x0832   /*将电控板CMD发送到MTK*/
+
+
+#define PROTOCOL_VERSION    0x0
+
+#define PLAY_START_ADDR 0x704b0000
+
+
+/*数据包解析*/
+
+#pragma pack(1)
+typedef struct
+{
+    unsigned int    SendTime;//重发的系统时间
+    unsigned int    SendNum;//k重发次数
+    unsigned int    cmd;
+    unsigned char   cmd_buf[2048]; //2KB buf做重发使用
+    unsigned int    flag;
+    unsigned int    length;
+} Pro_Wait_AckTypeDef;
+#pragma pack()
+
+
+#pragma pack(1)
+typedef struct
+{
+    unsigned int    head;
+    unsigned short  checksum;
+    unsigned short  cmd;
+    unsigned short	length;
+    unsigned short 	version;
+}Pro_HeadPartTypeDef;
+#pragma pack()
+
+
+/*function */
+void uart_dma_config(void);
+int broadlink_frame_create(
+                unsigned int type,
+                const unsigned char * input, unsigned int len,
+                unsigned char * output, unsigned int maxsize);
+void vTask_recdata_dealwith(void*pvParameters);
+void vTask_uart_recevie_data(void *parameter);
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
