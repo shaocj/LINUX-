@@ -329,3 +329,7 @@ void vTask_uart_recevie_data(void *parameter);
 #endif
 
 #endif
+
+
+如果是百度，pcm通过speex算法压缩后，使用http上传，如果说这个格式的话就是json,二进制数据进行网络传输都要经过base64编码，
+下发URL，解析出MP3格式播放
