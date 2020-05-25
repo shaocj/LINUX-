@@ -1,0 +1,9 @@
+回退撤销操作：
+一、先提交了版本1，之后做了修改提交变成了版本2
+	1、如果想从版本2回退到版本1：git reset --hard HEAD^;
+	2、回退到版本1后又后悔了想回到2:git reset --hard conmmit——id，commit-id如何获取，git reflog可以看到
+二、
+	1、如果修改了文件file1，没有add到暂存区，想恢复没修改之前的：git checkout -- file1
+	2、如果add到暂存区后，又修改了，想回到暂存区没有修改之前的：git checkout -- file1
+	3、如果工作去修改了后add到暂存区后，想要回退到工作区：git reset HEAD file可以把暂存区的修改撤销掉（unstage），重新放回工作区
+	
